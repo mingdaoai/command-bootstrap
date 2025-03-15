@@ -4,6 +4,11 @@ import argparse
 import os
 import sys
 import anthropic
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.shortcuts import prompt
+from prompt_toolkit.styles import Style
+from pathlib import Path
 
 def read_api_key():
     """Read Anthropic API key from ~/.mingdaoai/anthropic.key"""
@@ -150,41 +155,52 @@ def start_chat_interface():
     parser = argparse.ArgumentParser(description="Interactive chat interface with Claude")
     parser.add_argument("--files", nargs="+", required=False, 
                        help="Paths to files or directories containing the code to analyze")
-    parser.add_argument("--context-window", type=int, default=5,
-                       help="Number of previous Q&A pairs to include in context (default: 5)")
+    parser.add_argument("--context-window", type=int, default=10,
+                       help="Number of previous Q&A pairs to include in context (default: 10)")
     
     args = parser.parse_args()
     
     print("\nStarting code analysis with Claude...")
     chat_session = ChatSession(files=args.files, context_window=args.context_window)
     
+    # Initialize prompt session with file history
+    history_file = Path.home() / '.mingdaoai' / 'claude_chat_history'
+    history_file.parent.mkdir(exist_ok=True)
+    session = PromptSession(history=FileHistory(str(history_file)))
+    
     print("\nChat interface ready!")
-    print("Type 'exit', 'quit', or press Ctrl+C to end the chat.")
-    print("Type your message and press Enter. For multiple lines, keep typing and press Enter twice when done.")
+    print("Type 'exit', 'quit', or press Ctrl+D to end the chat")
+    print("For multiline input:")
+    print("  - Press Enter for a new line")
+    print("  - Press Esc then Enter to submit")
+    print("  - Or press Command+Enter (on Mac) to submit")
+    print("Use up/down arrow keys to navigate through input history")
     
     while True:
-        # Get multiline input
-        lines = []
-        while True:
-            try:
-                prompt = "> " if not lines else "... (press Enter again to send)"
-                line = input(prompt)
-                if line:
-                    lines.append(line)
-                elif lines:  # Empty line and we have content
-                    print("\nProcessing your question...", flush=True)
-                    break
-            except KeyboardInterrupt:
-                print("\nGoodbye!")
-                sys.exit(0)
-        
-        user_input = '\n'.join(lines)
-        
-        if user_input.lower() in ['exit', 'quit']:
-            print("Goodbye!")
-            break
+        try:
+            # Get user input with history and multiline support
+            user_input = session.prompt(
+                "\n> ",
+                multiline=True,
+                prompt_continuation=lambda width, line_number, is_soft_wrap: "... "
+            )
             
-        chat_session.chat(user_input)  # Response is now printed during streaming
+            if user_input.lower() in ['exit', 'quit']:
+                print("Goodbye!")
+                break
+                
+            print("\nProcessing your question...", flush=True)
+            chat_session.chat(user_input)
+            
+        except KeyboardInterrupt:
+            print("\nInput cancelled")
+            continue
+        except EOFError:
+            print("\nGoodbye!")
+            break
+        except Exception as e:
+            print(f"\nError: {str(e)}")
+            continue
 
 if __name__ == "__main__":
     start_chat_interface()
